@@ -118,4 +118,5 @@ Contributions are welcome! If you have suggestions for improvements, new feature
 For any questions or feedback, you can reach the author:
 
 Author: whitevamp
+
 GitHub: https://github.com/whitevamp
