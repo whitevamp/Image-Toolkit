@@ -44,10 +44,8 @@ To get started with Image Toolkit, follow these steps:
 
     Clone the repository:
 
-    git clone https://github.com/[YourGitHubUsername]/Image-Toolkit.git
+    git clone https://github.com/whitevamp/Image-Toolkit.git
     cd Image-Toolkit
-
-    (Replace [YourGitHubUsername] with your actual GitHub username.)
 
     Create a virtual environment (recommended):
 
@@ -60,13 +58,6 @@ To get started with Image Toolkit, follow these steps:
     Install dependencies:
 
     pip install -r requirements.txt
-
-    (You will need to create requirements.txt if you haven't already. It should contain customtkinter, Pillow, imagehash.)
-    A basic requirements.txt would look like this:
-
-    customtkinter
-    Pillow
-    imagehash
 
 🚀 Usage
 
