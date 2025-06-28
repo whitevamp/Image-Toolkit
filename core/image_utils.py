@@ -12,49 +12,69 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import math
-import random
 import os
-from typing import Dict, Tuple, List
+import math
 
-# Import COMMON_RESOLUTIONS_DEFINITIONS from its dedicated file
-from core.resolution_definitions import COMMON_RESOLUTIONS_DEFINITIONS
-
-# Define a small tolerance for floating-point comparisons of aspect ratios
-ASPECT_RATIO_TOLERANCE = 0.01
+# Aspect Ratio Tolerance: How close a calculated aspect ratio needs to be
+# to a common aspect ratio (e.g., 1.777... for 16:9) to be considered a match.
+# A smaller number means stricter matching.
+# For example, 0.01 would mean within 1% difference of the ratio.
+# This tolerance helps account for slight variations due to source image quality,
+# minor cropping, or floating-point inaccuracies.
+ASPECT_RATIO_TOLERANCE = 0.005 # Adjusted to be slightly stricter, common for image aspect ratios
 
 def get_simplified_ratio_string(width: int, height: int) -> str:
-    """Calculates the simplified aspect ratio string (e.g., '16:9') for given dimensions."""
+    """Calculates and returns the simplified aspect ratio string (e.g., "16:9")."""
     if height == 0:
-        return f"{width}:0" # Handle division by zero for height
+        return "N/A" # Or raise an error, depending on desired behavior for zero height
 
-    common_divisor = math.gcd(width, height)
-    simplified_width = width // common_divisor
-    simplified_height = height // common_divisor
+    gcd_val = math.gcd(width, height)
+    simplified_width = width // gcd_val
+    simplified_height = height // gcd_val
     return f"{simplified_width}:{simplified_height}"
 
-def is_portrait_ratio(ar_str: str) -> bool:
-    """Checks if an aspect ratio string represents a portrait orientation (height > width)."""
+def is_portrait_ratio(ar_string: str) -> bool:
+    """
+    Determines if an aspect ratio string represents a portrait orientation.
+    Handles both 'W:H' (e.g., '9:16') and decimal strings (e.g., '0.5625:1').
+    """
     try:
-        w, h = map(int, ar_str.split(':'))
-        return h > w
+        parts = ar_string.split(':')
+        if len(parts) == 2:
+            width = float(parts[0])
+            height = float(parts[1])
+            return height > width
+        else:
+            # Handle cases like "2.35:1" which is still landscape,
+            # but relies on the actual decimal ratio to determine orientation.
+            # If the aspect ratio string is not "W:H" format, we assume it's
+            # a ratio normalized to 1 (e.g., "0.5625") or similar.
+            # If it's a decimal form like 0.5625 (for 9:16), then width < height.
+            # If it's 1.777... (for 16:9), then width > height.
+            # Convert to actual float ratio to compare
+            decimal_ratio = float(ar_string)
+            return decimal_ratio < 1.0 # If width/height < 1, it's portrait
     except ValueError:
-        return False # Cannot determine if invalid format (e.g., "1.2:1")
+        print(f"Warning: Could not parse aspect ratio string for orientation: '{ar_string}'. Assuming landscape.")
+        return False # Default to false if parsing fails
 
-def get_random_name(word_list_file: str, num_words: int = 2) -> str:
-    """Generates a readable random name from a word list file."""
-    if not os.path.exists(word_list_file):
-        print(f"Warning: Word list file '{word_list_file}' not found. Generating a random string instead.")
-        return ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10))
+def get_random_name(names_file_path: str) -> str:
+    """Reads a random name from the specified names file."""
+    if not os.path.exists(names_file_path):
+        print(f"Warning: Names file '{names_file_path}' not found. Using default name.")
+        return "random_image"
 
     try:
-        with open(word_list_file, 'r') as f:
-            words = [line.strip().capitalize() for line in f if line.strip()]
-        if not words:
-            print(f"Warning: Word list file '{word_list_file}' is empty. Generating a random string instead.")
-            return ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10))
+        with open(names_file_path, 'r', encoding='utf-8') as f:
+            names = [line.strip() for line in f if line.strip()]
+        if names:
+            return names[os.urandom(1)[0] % len(names)] # Cryptographically strong random index
+        else:
+            print(f"Warning: Names file '{names_file_path}' is empty. Using default name.")
+            return "random_image"
+    except Exception as e:
+        print(f"Error reading names file '{names_file_path}': {e}. Using default name.")
+        return "random_image"
 
-        return '_'.join(random.sample(words, min(num_words, len(words))))
-    except IOError as e:
-        print(f"Error reading word list file '{word_list_file}': {e}. Generating a random string instead.")
-        return ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=10))
+
+

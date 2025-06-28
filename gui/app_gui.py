@@ -12,18 +12,22 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# This code is part of the Image Toolkit project, which provides a GUI for image processing,
+# scanning, duplicate finding, and configuration management.
+
 import customtkinter as ctk
 import os
 import threading
 from tkinter import filedialog, messagebox
 from typing import Any, List, Tuple
+import importlib.util # Added for dynamic import
 
 # Import core functionalities
 from core.config_manager import ConfigManager
 from core.image_scanner import ImageScanner
 from core.image_processor import ImageProcessor
 from core.duplicate_finder import DuplicateFinder
-from core.resolution_definitions import COMMON_RESOLUTIONS_DEFINITIONS # For populating dropdowns
+# COMMON_RESOLUTIONS_DEFINITIONS is now imported dynamically within methods where needed
 
 class AppGUI(ctk.CTk):
     def __init__(self, config_manager: ConfigManager):
@@ -31,7 +35,7 @@ class AppGUI(ctk.CTk):
         self.config_manager = config_manager
 
         self.title("Image Toolkit") # Updated title
-        self.geometry("800x800") # Increased height slightly for new content
+        self.geometry("900x800") # Increased height slightly for new content
         self.resizable(True, True)
 
         # Variables to store found duplicate paths for deletion
@@ -138,8 +142,8 @@ a tidy and organized image library.
         self.tabview.add("Image Scanning")
         self.tabview.add("Duplicate Finder")
         self.tabview.add("Tools & Settings")
-        self.tabview.add("About") # <-- NEW TAB
-        self.tabview.add("License") # <-- NEW TAB
+        self.tabview.add("About")
+        self.tabview.add("License")
 
 
         # --- Image Processing Tab ---
@@ -265,13 +269,34 @@ a tidy and organized image library.
         self.save_settings_button = ctk.CTkButton(self.tabview.tab("Tools & Settings"), text="Save All Current Settings", command=self._save_all_settings)
         self.save_settings_button.grid(row=0, column=0, padx=20, pady=10)
 
+        # Add search bar for Aspect Ratio Targets
+        self.ar_search_var = ctk.StringVar()
+        self.ar_search_entry = ctk.CTkEntry(self.tabview.tab("Tools & Settings"), width=300, placeholder_text="Search aspect ratio...", textvariable=self.ar_search_var)
+        self.ar_search_entry.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.ar_search_var.trace_add('write', lambda *args: self._populate_ar_settings(self.ar_search_var.get()))
+
         self.scrollable_frame = ctk.CTkScrollableFrame(self.tabview.tab("Tools & Settings"), label_text="Aspect Ratio Targets")
-        self.scrollable_frame.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
+        self.scrollable_frame.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
         self.scrollable_frame.grid_columnconfigure(0, weight=1)
 
         self._ar_option_menus = {} # To store references to CTkOptionMenu widgets
 
         self._populate_ar_settings() # Populate the scrollable frame with AR settings
+
+        # Enable mouse wheel scrolling for the Aspect Ratio Targets scrollable frame
+        def _on_mousewheel(event):
+            # For Windows and MacOS
+            self.scrollable_frame._parent_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        def _on_mousewheel_linux(event):
+            # For Linux (event.num 4=up, 5=down)
+            if event.num == 4:
+                self.scrollable_frame._parent_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.scrollable_frame._parent_canvas.yview_scroll(1, "units")
+        # Bind mouse wheel events
+        self.scrollable_frame._parent_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.scrollable_frame._parent_canvas.bind_all("<Button-4>", _on_mousewheel_linux)
+        self.scrollable_frame._parent_canvas.bind_all("<Button-5>", _on_mousewheel_linux)
 
         # --- About Tab ---
         self.tabview.tab("About").grid_columnconfigure(0, weight=1)
@@ -292,29 +317,24 @@ a tidy and organized image library.
 
     def _load_gpl_license_text(self) -> str:
         """Loads the GPL license text from the LICENSE file."""
-        license_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'LICENSE') # Assumes LICENSE is in project root
+        # Prioritize finding LICENSE relative to the current script or main.py
+        # assuming it's in the project root.
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.join(script_dir, '..') # Assumes gui is in project_root/gui
+        license_file_path = os.path.join(project_root, 'LICENSE')
 
-        # Check if the path to LICENSE file is in config and use that if available
-        # This makes it more robust if the user moves the LICENSE file
-        configured_license_path = self.config_manager.get('Paths', 'master_definitions_file', fallback=None)
-        if configured_license_path:
-            # Assuming LICENSE is alongside master_definitions_file if not in root
-            configured_license_path = os.path.join(os.path.dirname(configured_license_path), '..', 'LICENSE')
-            if os.path.exists(configured_license_path):
-                license_file_path = configured_license_path
-            else: # Fallback to common project root if the configured one isn't found
-                license_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'LICENSE')
-
+        # Fallback if the direct path doesn't work (unlikely if structure is standard)
         if not os.path.exists(license_file_path):
-            self._log_message(f"WARNING: License file not found at expected path: {license_file_path}. Displaying placeholder text.")
+            # Removed self._log_message call here
             return "License file (LICENSE) not found. Please ensure it's in the project root directory.\n\n" \
                    "This software is licensed under the GNU General Public License v3.0.\n" \
                    "A copy of the license is available at https://www.gnu.org/licenses/gpl-3.0.html"
+
         try:
             with open(license_file_path, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            self._log_message(f"ERROR: Could not read license file {license_file_path}: {e}")
+            # Removed self._log_message call here
             return f"Error loading license text: {e}"
 
 
@@ -403,19 +423,41 @@ a tidy and organized image library.
             self._log_message(f"ERROR: An error occurred during saving: {e}")
 
 
-    def _populate_ar_settings(self):
-        """Populates the scrollable frame with Aspect Ratio Target settings."""
+    def _populate_ar_settings(self, filter_text: str = ""):
+        """Populates the scrollable frame with Aspect Ratio Target settings, filtered by search."""
         # Clear existing widgets
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self._ar_option_menus = {} # Reset storage
 
-        # Dynamically import COMMON_RESOLUTIONS_DEFINITIONS to get the latest from file
-        from core.resolution_definitions import COMMON_RESOLUTIONS_DEFINITIONS as CurrentResolutionDefs
+        # Dynamically import COMMON_RESOLUTIONS_DEFINITIONS here
+        resolution_definitions_path = "" # Initialize here to prevent unbound variable warning
+        try:
+            resolution_definitions_path = self.config_manager.get('Paths', 'master_definitions_file')
+            CurrentResolutionDefs = {} # Initialize as empty
+
+            if os.path.exists(resolution_definitions_path):
+                spec = importlib.util.spec_from_file_location("resolution_definitions", resolution_definitions_path)
+                if spec and spec.loader:
+                    resolution_definitions_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(resolution_definitions_module)
+                    CurrentResolutionDefs = resolution_definitions_module.COMMON_RESOLUTIONS_DEFINITIONS
+                else:
+                    self._log_message(f"ERROR: Could not load module spec or loader for {resolution_definitions_path}.")
+            else:
+                self._log_message(f"WARNING: Resolution definitions file not found at {resolution_definitions_path}. Aspect Ratio Targets dropdowns might be empty.")
+
+        except Exception as e:
+            self._log_message(f"ERROR: Failed to dynamically import COMMON_RESOLUTIONS_DEFINITIONS for GUI from {resolution_definitions_path}: {e}. AR settings dropdowns might be empty.")
+            CurrentResolutionDefs = {} # Fallback to empty dict
 
         sorted_ar_keys = sorted(CurrentResolutionDefs.keys(),
                                 key=lambda x: (float(x.split(':')[0]) / float(x.split(':')[1])
                                                if float(x.split(':')[1]) != 0 else float('inf')))
+
+        # Filter aspect ratios by search text
+        if filter_text:
+            sorted_ar_keys = [ar for ar in sorted_ar_keys if filter_text.lower() in ar.lower()]
 
         row_num = 0
         for ar_str in sorted_ar_keys:
@@ -442,6 +484,9 @@ a tidy and organized image library.
             dropdown = ctk.CTkOptionMenu(self.scrollable_frame, values=option_values, variable=var,
                                         command=lambda val, ar=ar_str: self._update_config_setting('ImageSettings', f"target_resolution_{ar.replace(':', '_').replace('.', '_')}", val))
             dropdown.grid(row=row_num, column=1, padx=5, pady=2, sticky="ew")
+
+            # Debug: Log the available options for each aspect ratio
+            # self._log_message(f"Aspect Ratio {ar_str} options: {option_values}")
 
             self._ar_option_menus[ar_str] = var
 
@@ -517,7 +562,7 @@ a tidy and organized image library.
 
     def _start_duplicate_finder_thread(self):
         """Starts duplicate image finding in a separate thread, with optional action."""
-        self._log_message("Starting duplicate image detection...")
+        self._log_message("Starting image processing...")
         self._save_all_settings()
 
         latest_config_manager = ConfigManager()
@@ -602,4 +647,3 @@ a tidy and organized image library.
             self._log_message(f"ERROR during deletion: {e}")
         finally:
             self.after(0, lambda: self._set_all_buttons_state("normal"))
-

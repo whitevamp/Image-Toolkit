@@ -14,17 +14,18 @@
 
 import os
 from PIL import Image
-from typing import Tuple, Dict
+from typing import Tuple, Dict, List
+import importlib.util # Used for dynamic import
 
 # Import from our core modules
 from core.config_manager import ConfigManager
 from core.image_utils import (
     get_random_name,
-    get_simplified_ratio_string, # Still useful for other outputs/understanding
+    get_simplified_ratio_string,
     ASPECT_RATIO_TOLERANCE,
 )
-# Import COMMON_RESOLUTIONS_DEFINITIONS from its new dedicated file
-from core.resolution_definitions import COMMON_RESOLUTIONS_DEFINITIONS
+# The import for COMMON_RESOLUTIONS_DEFINITIONS has been removed from here
+# and will be handled dynamically within the __init__ method below.
 
 class ImageProcessor:
     """
@@ -51,10 +52,29 @@ class ImageProcessor:
             fallback_goal_str, self.custom_width, self.custom_height
         )
 
+        # Dynamically import COMMON_RESOLUTIONS_DEFINITIONS here,
+        # ensuring the file exists before attempting to load it.
+        resolution_definitions_path = self.config_manager.get('Paths', 'master_definitions_file')
+        self._common_resolutions_definitions = {} # Initialize with empty dict as fallback
+
+        if os.path.exists(resolution_definitions_path):
+            try:
+                spec = importlib.util.spec_from_file_location("resolution_definitions", resolution_definitions_path)
+                if spec and spec.loader:
+                    resolution_definitions_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(resolution_definitions_module)
+                    self._common_resolutions_definitions = resolution_definitions_module.COMMON_RESOLUTIONS_DEFINITIONS
+                else:
+                    print(f"ERROR: Could not load module spec or loader for {resolution_definitions_path}.")
+            except Exception as e:
+                print(f"ERROR: Failed to dynamically import COMMON_RESOLUTIONS_DEFINITIONS from {resolution_definitions_path}: {e}")
+                print("Image processing might not use aspect ratio specific targets correctly.")
+        else:
+            print(f"WARNING: Resolution definitions file not found at {resolution_definitions_path}. Aspect ratio targets will not be used.")
+
         # Pre-calculate decimal aspect ratios for quick lookup from definitions
-        # This will store (decimal_aspect_ratio, original_ar_string_key) tuples
         self.ar_decimal_key_map: List[Tuple[float, str]] = []
-        for ar_str_def in COMMON_RESOLUTIONS_DEFINITIONS:
+        for ar_str_def in self._common_resolutions_definitions:
             try:
                 # Use split(':') to handle "X:Y" or float strings like "2.35:1"
                 parts = ar_str_def.split(':')
@@ -156,9 +176,9 @@ class ImageProcessor:
                                     # Now, check if there's a specific target level for it in config.ini
                                     target_level_str = ar_specific_targets.get(matched_ar_key) # Get level from config
 
-                                    if target_level_str and matched_ar_key in COMMON_RESOLUTIONS_DEFINITIONS and target_level_str in COMMON_RESOLUTIONS_DEFINITIONS[matched_ar_key]:
-                                        # Use the dimensions from the COMMON_RESOLUTIONS_DEFINITIONS
-                                        target_width, target_height = COMMON_RESOLUTIONS_DEFINITIONS[matched_ar_key][target_level_str]
+                                    if target_level_str and matched_ar_key in self._common_resolutions_definitions and target_level_str in self._common_resolutions_definitions[matched_ar_key]:
+                                        # Use the dimensions from the _common_resolutions_definitions
+                                        target_width, target_height = self._common_resolutions_definitions[matched_ar_key][target_level_str]
                                         chosen_method = f"Aspect Ratio Match ({matched_ar_key}) to {target_level_str}"
                                     else:
                                         # No specific target level set in config for this aspect ratio, or level not found in definitions.

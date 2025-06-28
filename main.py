@@ -12,20 +12,37 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import customtkinter as ctk
-from core.config_manager import ConfigManager
-from gui.app_gui import AppGUI
+# This script initializes the application, sets up directories, and runs the GUI.
+# It ensures that necessary configuration files and directories are created if they do not exist.
+# It also checks for duplicate aspect ratios in the resolution definitions file at startup.
+# This is the main entry point for the Image Toolkit application.
+# This file is part of the Image Toolkit project, which provides tools for image processing and management.
+# This file is responsible for setting up the application environment and launching the GUI.
+# It is designed to be run as a standalone script, initializing the application and starting the GUI.
+
+
+# main.py - Main entry point for the Image Toolkit application
 import os
+import sys
+import configparser
+import shutil # For initial directory setup
+import ast # For safely evaluating strings from config
+import importlib.util # For dynamic import of resolution_definitions.py
 
-# --- Full COMMON_RESOLUTIONS_DEFINITIONS for initial file creation ---
-# This ensures that if resolution_definitions.py doesn't exist, it's populated
-# with the complete, known set of definitions, preventing overwrites.
-_INITIAL_COMMON_RESOLUTIONS_CONTENT = """from typing import Dict, Tuple
+# Add the directory containing main.py to sys.path
+# This ensures sibling modules like app_gui.py can be imported
+script_dir_for_sys_path = os.path.dirname(os.path.abspath(__file__))
+if script_dir_for_sys_path not in sys.path:
+    sys.path.insert(0, script_dir_for_sys_path)
 
-# Master dictionary of common aspect ratios and their associated resolutions
-# This acts as the authoritative source for resolution definitions.
-# This dictionary can be updated by the scanner's merging functions.
-COMMON_RESOLUTIONS_DEFINITIONS: Dict[str, Dict[str, Tuple[int, int]]] = {
+# Corrected import path for AppGUI (assuming app_gui.py is in the same directory as main.py)
+from gui.app_gui import AppGUI
+from core.config_manager import ConfigManager # This will now be the modified ConfigManager
+
+# Define the initial content for resolution_definitions.py
+# This will be written if the file doesn't exist or is empty.
+_INITIAL_COMMON_RESOLUTIONS_CONTENT = """
+COMMON_RESOLUTIONS_DEFINITIONS = {
     '16:9': {
         '720p': (1280, 720), # Commonly known as HD
         '1080p': (1920, 1080), # Commonly known as Full HD
@@ -136,110 +153,121 @@ COMMON_RESOLUTIONS_DEFINITIONS: Dict[str, Dict[str, Tuple[int, int]]] = {
         'Large 4:5 Portrait': (2048, 2560),
         'Medium 4:5 Portrait': (1024, 1280),
         'Desktop Portrait': (1280, 1600)
-    },
-    '3:5': {
-        'Custom Portrait': (1680, 2800)
-    },
-    '7:10': {
-        'Custom Portrait': (1400, 2000)
-    },
-    '19:24': {
-        'Custom Portrait': (1216, 1536)
-    },
-    '47:53': {
-        'Custom Portrait': (1504, 1696)
-    },
-    '53:88': {
-        'Custom Portrait': (1696, 2816)
-    },
-    '55:84': {
-        'Custom Portrait': (880, 1344)
-    },
-    '64:75': {
-        'Custom Portrait': (1024, 1200)
-    },
-    '71:86': {
-        'Custom Portrait': (1136, 1376)
-    },
-    '151:262': {
-        'Custom Portrait': (1208, 2096)
-    },
-    '187:250': {
-        'Custom Portrait': (1496, 2000)
-    },
-    '199:256': {
-        'Custom Portrait': (995, 1280)
-    },
-    '201:308': {
-        'Custom Portrait': (1608, 2464)
-    },
-    '730:499': {
-        'Custom Landscape': (730, 499)
-    },
-    '832:1193': {
-        'Custom Portrait': (832, 1193)
-    },
-    '1469:2560': {
-        'Custom Portrait': (1469, 2560)
-    },
-    '1479:2560': {
-        'Custom Portrait': (1479, 2560)
-    },
-    '1573:2560': {
-        'Custom Portrait': (1573, 2560)
-    },
-    '1645:1152': {
-        'Custom Landscape': (1645, 1152)
-    },
-    '55:69': { # From 165x207
-        'Custom Portrait': (165, 207)
-    },
-    '64:81': { # From 1024x1296
-        'Custom Portrait': (1024, 1296)
-    },
-    '160:263': { # Newly added
-        'Common Portrait (160:263)': (1280, 2104)
     }
 }
 """
 
+def create_initial_config_and_dirs(primary_config_path='config.ini', image_settings_config_path='image_settings.ini'):
+    """
+    Creates initial directories and default config files if they don't exist.
+    Ensures resolution_definitions.py also exists and has default content.
+    """
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = current_script_dir
+
+    if os.path.basename(current_script_dir) == 'image_processing' and \
+       os.path.exists(os.path.join(current_script_dir, 'Image-Toolkit', 'main.py')):
+        script_dir = os.path.join(current_script_dir, 'Image-Toolkit')
+
+    print(f"Debug: Determined project root directory (script_dir): {script_dir}")
+
+    # Initialize ConfigManager here to ensure default files are created
+    # This will create both config.ini and image_settings.ini if they don't exist
+    config_manager_for_init = ConfigManager(primary_config_path, image_settings_config_path)
+
+    # Use a regular ConfigParser to read/write for initial setup,
+    # as ConfigManager handles defaults internally now.
+    # The purpose of this function is to set up directories and ensure master_definitions_file
+    # based on potentially *newly created* config files.
+    config = configparser.ConfigParser()
+    config.read([primary_config_path, image_settings_config_path]) # Read both into a temp parser
+
+    # Define default paths relative to the *determined* script_dir
+    # These will be written to the config files by ConfigManager's _create_default methods,
+    # but we use them here for directory creation logic.
+    default_input_dir = os.path.join(script_dir, 'input_images')
+    default_output_dir = os.path.join(script_dir, 'output_processed_images')
+    default_scanner_output_dir = os.path.join(script_dir, 'scan_reports')
+    default_exclusion_file = os.path.join(script_dir, 'excluded_sizes.txt')
+    default_master_defs_file = os.path.join(script_dir, 'core', 'resolution_definitions.py')
+    default_hashes_cache_file = os.path.join(script_dir, 'image_cache', 'image_hashes.txt')
+    default_duplicate_report_file = os.path.join(script_dir, 'duplicate_reports', 'duplicate_images.txt')
+    default_duplicate_action_dir = os.path.join(script_dir, 'duplicate_actions_archive')
+    default_names_file = os.path.join(script_dir, 'names.txt')
+
+    # Create directories if they don't exist
+    paths_to_ensure = [
+        config.get('Paths', 'input_directory', fallback=default_input_dir),
+        config.get('Paths', 'output_directory', fallback=default_output_dir),
+        config.get('Paths', 'scanner_output_directory', fallback=default_scanner_output_dir),
+        os.path.dirname(config.get('Paths', 'image_hashes_cache_file', fallback=default_hashes_cache_file)),
+        os.path.dirname(config.get('Paths', 'duplicate_report_file', fallback=default_duplicate_report_file)),
+        config.get('Paths', 'duplicate_action_directory', fallback=default_duplicate_action_dir)
+    ]
+
+    for path_value in paths_to_ensure:
+        if not os.path.isabs(path_value):
+            final_absolute_path = os.path.join(script_dir, path_value)
+        else:
+            final_absolute_path = path_value
+        os.makedirs(final_absolute_path, exist_ok=True)
+        print(f"Ensured directory: {final_absolute_path}")
+
+    # Ensure resolution_definitions.py exists and has initial content
+    master_defs_file_path_from_config = config.get('Paths', 'master_definitions_file', fallback=default_master_defs_file)
+    if not os.path.isabs(master_defs_file_path_from_config):
+        final_master_defs_file_path = os.path.join(script_dir, master_defs_file_path_from_config)
+    else:
+        final_master_defs_file_path = master_defs_file_path_from_config
+
+    if not os.path.exists(final_master_defs_file_path) or os.path.getsize(final_master_defs_file_path) == 0:
+        print(f"Creating initial '{final_master_defs_file_path}' with default common resolutions...")
+        os.makedirs(os.path.dirname(final_master_defs_file_path), exist_ok=True)
+        with open(final_master_defs_file_path, 'w') as f:
+            f.write(_INITIAL_COMMON_RESOLUTIONS_CONTENT)
+        print(f"Created initial resolution definitions file: {final_master_defs_file_path}")
+    else:
+        print(f"Resolution definitions file already exists: {final_master_defs_file_path}")
+
+    # Ensure names.txt exists
+    names_file_path = config.get('Paths', 'names_file', fallback=default_names_file)
+    if not os.path.exists(names_file_path):
+        print(f"Creating initial '{names_file_path}'...")
+        with open(names_file_path, 'w') as f:
+            f.write("image\nphoto\npicture\nlandscape\nportrait\nabstract\nvista\nscene\nart\n")
+        print(f"Created initial names file: {os.path.abspath(names_file_path)}")
+
+    # Ensure exclusion_reference.txt exists
+    exclusion_file_path = config.get('Paths', 'exclusion_reference_file', fallback=default_exclusion_file)
+    if not os.path.exists(exclusion_file_path):
+        print(f"Creating initial '{exclusion_file_path}'...")
+        with open(exclusion_file_path, 'w') as f:
+            f.write("# Add resolutions to exclude from scanning (e.g., 1920x1080)\n")
+        print(f"Created initial exclusion reference file: {os.path.abspath(exclusion_file_path)}")
+
+    print(f"Configuration file '{primary_config_path}' and '{image_settings_config_path}' ensured/updated.")
+
+# print("DEBUG: Before duplicate check block")
+# Check for duplicate aspect ratios at startup
+try:
+    from core.definitions_dup_check import check_for_duplicate_aspect_ratios
+    check_for_duplicate_aspect_ratios()
+except Exception as e:
+    print(f"[WARNING] Could not check for duplicate aspect ratios: {e}")
 
 def main():
-    # Set the appearance mode and color theme
-    ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme("blue")
+    """Main function to initialize and run the GUI application."""
+    primary_config_file_path = 'config.ini'
+    image_settings_config_file_path = 'image_settings.ini'
 
-    # Initialize the configuration manager
-    config_manager = ConfigManager(config_file='config.ini')
+    # Ensure initial configuration and directories are set up
+    create_initial_config_and_dirs(primary_config_file_path, image_settings_config_file_path)
 
-    # Create dummy directories if they don't exist, so the app starts cleanly
-    os.makedirs(config_manager.get('Paths', 'input_directory'), exist_ok=True)
-    os.makedirs(config_manager.get('Paths', 'output_directory'), exist_ok=True)
-    os.makedirs(config_manager.get('Paths', 'scanner_output_directory'), exist_ok=True)
+    # Initialize ConfigManager with both config file paths
+    config_manager = ConfigManager(primary_config_path=primary_config_file_path,
+                                   image_settings_config_path=image_settings_config_file_path)
 
-    # Create the image_cache directory for hashes
-    os.makedirs(os.path.dirname(config_manager.get('Paths', 'image_hashes_cache_file')), exist_ok=True) # <-- ADDED THIS LINE
-
-    # Create dummy names.txt and excluded_sizes.txt if they don't exist
-    if not os.path.exists(config_manager.get('Paths', 'names_file')):
-        with open(config_manager.get('Paths', 'names_file'), 'w') as f:
-            f.write("Default\nName\nExample\n")
-    if not os.path.exists(config_manager.get('Paths', 'exclusion_reference_file')):
-        with open(config_manager.get('Paths', 'exclusion_reference_file'), 'w') as f:
-            f.write("# Default exclusion list - add your sizes here (e.g., 1920x1080)\n")
-            f.write("1920x1080\n")
-            f.write("1024x768\n")
-
-    # Ensure the master_definitions_file (resolution_definitions.py) exists with the full dictionary structure
-    master_defs_path = config_manager.get('Paths', 'master_definitions_file')
-    if not os.path.exists(master_defs_path):
-        os.makedirs(os.path.dirname(master_defs_path), exist_ok=True)
-        with open(master_defs_path, 'w') as f:
-            f.write(_INITIAL_COMMON_RESOLUTIONS_CONTENT) # Write the full content
-        print(f"Created default master definitions file: {master_defs_path}")
-
-
-    # Create and run the GUI application
+    # Now, run the GUI
     app = AppGUI(config_manager)
     app.mainloop()
 
